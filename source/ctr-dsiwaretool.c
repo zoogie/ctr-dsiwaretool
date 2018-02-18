@@ -32,22 +32,6 @@ typedef struct ecc_cert_t
 	uint8_t padding2[0x3c];
 } __attribute__((packed)) ecc_cert_t;
 
-typedef struct ecc_certex_t
-{
-	struct {
-		uint32_t type;
-		ecc_point_t val;
-		uint8_t padding[0x40];
-	} sig;
-	char issuer[0x40];
-	uint32_t key_type;
-	char key_id[0x40];
-	uint32_t unk;
-	ecc_point_t pubkey;
-	uint8_t padding2[0x3c];
-	uint8_t privkey[0x1c];
-} __attribute__((packed)) ecc_certex_t;
-
 int verifyecdsa_signature(ecc_point_t *certpubkeypoint, ecc_point_t *signature, uint8_t *hash, uint32_t hashsize)
 {
 	int ret;
@@ -205,16 +189,6 @@ void sign_footer(unsigned char *footer, unsigned int totalhashsize, unsigned cha
 	printf("Done.\n");
 }
 
-void fake_ctcert(ecc_certex_t* ctcert){
-	unsigned char hash[0x20];
-	uint8_t ctcert_privk[30];
-	
-	generate_ecdsakeys(&ctcert->pubkey, ctcert_privk);
-	memcpy(&ctcert->privkey, ctcert_privk, 0x1e);
-	SHA256((uint8_t*)ctcert->issuer, sizeof(ecc_cert_t) - sizeof(ctcert->sig), hash);
-	create_ecdsa_signature(ctcert_privk, hash, 0x20, &ctcert->sig.val);
-}
-
 int main(int argc, char **argv)
 {
 	FILE *f;
@@ -223,9 +197,9 @@ int main(int argc, char **argv)
 	unsigned char footer[0x4e0];
 	unsigned char sign_ctcert[0x19e];
 
-	if(argc<2)return 0;
+	if(argc<2)return 1;
 
-	if(stat(argv[1], &filestat)==-1)return 0;
+	if(stat(argv[1], &filestat)==-1)return 1;
 
 	if((filestat.st_size < 0x400) || (filestat.st_size > 0x4e0))
 	{
@@ -236,7 +210,7 @@ int main(int argc, char **argv)
 	memset(footer, 0, 0x4e0);
 	memset(sign_ctcert, 0, 0x19e);
 	f = fopen(argv[1], "rb");
-	if(f==NULL)return 0;
+	if(f==NULL)return 1;
 	fread(footer, 1, filestat.st_size, f);
 	fclose(f);
 
@@ -246,29 +220,21 @@ int main(int argc, char **argv)
 	{
 		printf("Loading CTCert...\n");
 
-		if(strncmp(argv[2], "--fake", 6)==0){
-			printf("Generating fake CTcert... ");
-			memcpy(sign_ctcert, &footer[totalhashsize + 0x1bc], 0x180);
-			fake_ctcert((ecc_certex_t*)sign_ctcert);
-			printf("Done.\n");
-		}
-		else{
-			f = fopen(argv[2], "rb");
-			if(f==NULL)return 0;
-			fread(sign_ctcert, 1, 0x19e, f);
-			fclose(f);
-		}
+		f = fopen(argv[2], "rb");
+		if(f==NULL)return 2;
+		fread(sign_ctcert, 1, 0x19e, f);
+		fclose(f);
 
 		sign_footer(footer, totalhashsize, sign_ctcert);
 	}
 
-	if(verify_footer(footer, totalhashsize)!=0)return 1;
+	if(verify_footer(footer, totalhashsize)!=0)return 3;
 
 	if(argc>=4 && strncmp(argv[3], "--write", 7)==0)
 	{
 		printf("Writing footer data... ");
 		f = fopen(argv[1], "wb");
-		if(f==NULL)return 0;
+		if(f==NULL)return 1;
 		fwrite(footer, 1, filestat.st_size, f);
 		fclose(f);
 		printf("Done.\n");
